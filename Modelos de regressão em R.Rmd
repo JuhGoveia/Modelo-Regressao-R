@@ -1,0 +1,173 @@
+---
+title: "Trabalho01"
+output:
+  html_document: default
+  pdf_document: default
+date: "2023-08-28"
+---
+
+```{r, results='hide'}
+
+## Carregando as bibliotecas necessárias
+
+if(!require(tidyverse)){install.packages("tidyverse"); library(tidyverse);} #Pacote básico para analise de dados
+if(!require(GGally)){install.packages("GGally"); library(GGally);} #Pacore para Pair Ploting
+if(!require(qcc)){install.packages("qcc"); library(qcc);} #Pacote para o pareto chart
+if(!require(caret)){install.packages("caret"); library(caret);} #Pacote para o Split
+if(!require(MASS)){install.packages("MASS"); library(MASS);} #Pacote para o qqnorm
+if(!require(tree)){install.packages("tree"); library(tree);} #Pacote para arvore de decisão
+
+```
+
+
+
+```{r}
+
+
+## Definido diretorio para o R e carregando dataset
+
+setwd("C:/Users/kvdvi/Documents/R/databases")
+dados <- read_csv2("claims.csv");
+```
+# A) Analise descritiva dos dados e agrupamento de variaveis categoricas
+
+```{r}
+
+
+cat('Numero de linhas:',  nrow(dados), '\n')
+cat("Numero de colunas:", ncol(dados), '\n')
+
+## validando se existe nulos
+
+cat("Quantidade de nulos:", sum(is.na(dados)), '\n')
+
+cat("Colunas:", colnames(dados), '\n')
+
+
+
+## validando principais medidas estatisticas
+describe(dados)
+
+```
+
+```{r}
+## diminuindo a quantidade de categoria das variavel areac para 4 categorias
+
+dados$areac <- fct_lump(dados$areac, n=3)
+table(dados$areac)
+
+pareto.chart(table(dados$areac))
+```
+
+```{r}
+## diminuindo a quantidade de categoria das variavel tipov para 4 categorias, pois observamos que a maior parte dos valores se distribuem nas 3 primeiras categorias
+
+dados$tipov <- fct_lump(dados$tipov , n=3)
+table(dados$tipov)
+
+pareto.chart(table(dados$tipov))
+```
+
+```{r}
+dados$cmsinistros = dados$csinistros / dados$nsinistros
+head(dados)
+```
+
+#B-) Aplicando o modelo de regressão Linear e analisando residuos
+
+```{r}
+# Converter variáveis categóricas em variáveis dummy
+dados_dummies <- model.matrix(~ tipov + sexoc + areac - 1, data = dados) %>%
+  as.data.frame()
+
+# Preparar dataframe para regressão
+dados_reg <- bind_cols(dados, dados_dummies) %>%
+  dplyr::select(-tipov, -sexoc, -areac, -csinistros, -valorv, -expos)
+
+# Separar variáveis independentes e dependente
+X <- dados_reg %>%
+  dplyr::select(-cmsinistros)
+y <- dados$cmsinistros
+
+head(X)
+```
+
+```{r}
+split <- createDataPartition(y, p = 0.8, list = FALSE)
+X_treino <- X[split, ]
+X_teste <- X[-split, ]
+y_treino <- y[split]
+y_teste <- y[-split]
+
+modelo_linear <- lm(y_treino ~ ., data = X_treino)
+
+y_prev <- predict(modelo_linear, newdata = X_teste)
+
+residuos <- y_teste - y_prev
+
+
+residuos_df <- data.frame(y_prev = y_prev, residuos = residuos)
+
+p1 <- ggplot(residuos_df, aes(x = y_prev, y = residuos)) +
+  geom_point(color = "blue", size = 3, alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red") +
+  labs(title = "Residuos vs. Valores Previstos",
+       x = "Valores Previstos",
+       y = "Residuos") +
+  theme_minimal()
+
+p2 <- ggplot(residuos_df, aes(sample = residuos)) +
+  stat_qq(color = "blue", size = 3, alpha = 0.6) +
+  stat_qq_line(color = "red") +
+  labs(title = "Grafico Q-Q dos Residuos") +
+  theme_minimal()
+
+print(p1)
+print(p2)
+
+```
+
+# C-) Aplicação do modelo de Árvore de decisão
+
+```{r}
+arvore <- tree(y_treino ~ ., data = X_treino)
+
+y_prev_arvore <- predict(arvore, newdata = X_teste)
+
+```
+
+```{r}
+## Análise de resdiduos para Árvore de decisão
+
+residuos_arvore <- y_teste - y_prev_arvore
+
+a1 <- ggplot(data.frame(y_prev_arvore, residuos_arvore), aes(x = y_prev_arvore, y = residuos_arvore)) +
+  geom_point(color = "blue", size = 3, alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red") +
+  labs(title = "Resíduos vs. Valores Previstos (Árvore de Decisão)",
+       x = "Valores Previstos",
+       y = "Resíduos") +
+  theme_minimal()
+
+a2 <- ggplot(data.frame(residuos_arvore), aes(sample = residuos_arvore)) +
+  stat_qq(color = "blue", size = 3, alpha = 0.6) +
+  stat_qq_line(color = "red") +
+  labs(title = "Grafico Q-Q dos Residuos") +
+  theme_minimal()
+
+print(a1)
+print(a2)
+```
+#D-) Comparação dos modelos criados
+
+```{r}
+mse_regressao <- mean((y_treino - y_prev)^2)
+mse_arvore <- mean((y_teste - y_prev_arvore)^2)
+
+
+cat('\nMSE para Regressão Linear: ', mse_regressao)
+cat('\nMSE para Árvore de decisão: ', mse_arvore, '\n')
+
+print('De acordo com a métrica MSE, o modelo mais indicado para o caso é o modelo de Árvore de Decisão')
+
+```
